@@ -1,0 +1,216 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemma IA Offline Lite</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 10px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 15px;
+            border: 1px solid #ccc;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        h1 {
+            font-size: 20px;
+            color: #a00;
+        }
+        #exitButton {
+            padding: 5px 10px;
+            background-color: #555;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .instructions {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .chat-container {
+            height: 60vh;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        .user-message {
+            background-color: #a00;
+            color: white;
+            margin-left: 30%;
+            margin-right: 5%;
+            border-radius: 10px 10px 0 10px;
+            padding: 8px;
+            margin-bottom: 5px;
+            max-width: 65%;
+        }
+        .gemma-message {
+            background-color: #ddd;
+            color: #333;
+            margin-right: 30%;
+            margin-left: 5%;
+            border-radius: 10px 10px 10px 0;
+            padding: 8px;
+            margin-bottom: 5px;
+            max-width: 65%;
+        }
+        .gemma-message p {
+            margin: 0;
+            white-space: pre-line;
+        }
+        .error-message {
+            background-color: #fee;
+            color: #a00;
+            margin-right: 30%;
+            margin-left: 5%;
+            border-radius: 10px 10px 10px 0;
+            padding: 8px;
+            margin-bottom: 5px;
+            max-width: 65%;
+        }
+        .input-container {
+            position: sticky;
+            bottom: 0;
+            background-color: white;
+            padding: 5px 0;
+            display: flex;
+        }
+        #queryInput {
+            flex-grow: 1;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-right: none;
+        }
+        #submitButton {
+            padding: 5px 10px;
+            background-color: #a00;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Gemma IA Offline Lite - Versión 1.2.6</h1>
+            <button id="exitButton">Salir</button>
+        </div>
+        <p class="instructions">Escribe una consulta para obtener ayuda. Ejemplos: "¿Dónde estoy si estoy en un bosque?", "Hazme un documento sobre cómo sobrevivir a un terremoto", "¿Cómo realizar RCP?". Usa el botón "Salir" o escribe "salir" para cerrar.</p>
+        <div id="chatContainer" class="chat-container"></div>
+        <div class="input-container">
+            <input type="text" id="queryInput" placeholder="Escribe tu consulta aquí...">
+            <button id="submitButton">Enviar</button>
+        </div>
+    </div>
+    <script>
+        const queryInput = document.getElementById('queryInput');
+        const submitButton = document.getElementById('submitButton');
+        const exitButton = document.getElementById('exitButton');
+        const chatContainer = document.getElementById('chatContainer');
+
+        function addMessage(content, isUser = false, isError = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = isUser ? 'user-message' : (isError ? 'error-message' : 'gemma-message');
+            messageDiv.innerHTML = content.replace(/\n/g, '<br>');
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        submitButton.addEventListener('click', async () => {
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            addMessage(query, true);
+            submitButton.disabled = true;
+
+            try {
+                const response = await fetch('/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `query=${encodeURIComponent(query)}`
+                });
+                const data = await response.json();
+                
+                if (data.status === 'error') {
+                    addMessage(`${data.title}: ${data.message}`, false, true);
+                } else {
+                    addMessage(`${data.title}\n${data.message}`);
+                }
+            } catch (error) {
+                addMessage('Error: Error al conectar con el servidor. Asegúrate de que el ejecutable esté corriendo.', false, true);
+            }
+
+            submitButton.disabled = false;
+            queryInput.value = '';
+        });
+
+        exitButton.addEventListener('click', async () => {
+            try {
+                await fetch('/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'query=salir'
+                });
+                addMessage('Gemma IA Offline Lite: ¡Hasta luego! Cierra la ventana para terminar.');
+            } catch (error) {
+                addMessage('Error: Error al cerrar la sesión.', false, true);
+            }
+        });
+
+        queryInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') submitButton.click();
+        });
+    </script>
+</body>
+</html>
