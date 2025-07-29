@@ -1,0 +1,168 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemma IA Offline - Version 1.3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 font-sans min-h-screen flex items-center justify-center">
+    <div class="w-full max-w-3xl mx-4 my-8 p-6 bg-white rounded-lg shadow-lg">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">Gemma IA Offline - Version 1.3</h1>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div class="flex items-center space-x-2">
+                <label class="text-sm font-medium text-gray-700">Language:</label>
+                <select id="language" class="border border-gray-300 rounded-md p-2 text-sm focus:ring-blue-500 focus:border-blue-500">
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="ru">Russian</option>
+                </select>
+            </div>
+            <button onclick="updateConfig()" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium">Apply Language</button>
+            <button onclick="openFolder()" class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 text-sm font-medium">Open GemmaFiles</button>
+        </div>
+        
+        <p class="text-sm text-gray-600 mb-6"><strong>Instructions:</strong> Enter emergency queries (e.g., “How to survive a flood?”). Use “create,” “make,” “generate” (English), “crear,” “hacer,” “generar” (Spanish), or “создать,” “сделать,” “генерировать” (Russian) to save files in GemmaFiles. Type “exit” to close.</p>
+        
+        <div id="chat" class="bg-gray-100 p-4 rounded-md max-h-96 overflow-y-auto mb-6">
+            <!-- Chat messages will appear here -->
+        </div>
+        
+        <div class="flex items-center mb-4">
+            <input type="text" id="message" placeholder="Enter your query..." class="flex-grow border border-gray-300 p-3 rounded-l-md text-sm focus:ring-blue-500 focus:border-blue-500">
+            <button onclick="sendMessage()" class="bg-blue-600 text-white px-6 py-3 rounded-r-md hover:bg-blue-700 text-sm font-medium">Submit</button>
+        </div>
+        
+        <button onclick="exitProgram()" class="w-full bg-red-600 text-white px-4 py-3 rounded-md hover:bg-red-700 text-sm font-medium">Exit</button>
+        
+        <p class="text-xs text-gray-500 mt-6 text-center">Gemma IA Offline is an independent project using Google’s Gemma models, not affiliated with or endorsed by Google.</p>
+    </div>
+
+    <script>
+        // Load config
+        async function loadConfig() {
+            try {
+                const response = await fetch("/GemmaFiles/config.json");
+                const config = await response.json();
+                document.getElementById("language").value = config.language || "en";
+            } catch (e) {
+                console.error("Error loading config:", e);
+            }
+        }
+
+        // Update config and reload
+        async function updateConfig() {
+            const config = {
+                language: document.getElementById("language").value
+            };
+            try {
+                await fetch("/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "update_config", config })
+                });
+                // Reload page to reflect language change
+                location.reload();
+            } catch (e) {
+                console.error("Error updating config:", e);
+            }
+        }
+
+        // Send message
+        async function sendMessage() {
+            const message = document.getElementById("message").value.trim();
+            if (!message) return;
+            if (message.toLowerCase() === "exit") exitProgram();
+
+            const chat = document.getElementById("chat");
+            const userDiv = document.createElement("div");
+            userDiv.className = "bg-red-600 text-white p-3 rounded-lg my-2 ml-auto max-w-[80%] text-sm";
+            userDiv.textContent = message;
+            chat.appendChild(userDiv);
+
+            try {
+                const response = await fetch("/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "chat", message })
+                });
+                const data = await response.json();
+
+                const aiDiv = document.createElement("div");
+                aiDiv.className = "bg-gray-300 text-gray-800 p-3 rounded-lg my-2 max-w-[80%] text-sm";
+                aiDiv.textContent = data.response;
+                chat.appendChild(aiDiv);
+                chat.scrollTop = chat.scrollHeight;
+            } catch (e) {
+                console.error("Error sending message:", e);
+            }
+
+            document.getElementById("message").value = "";
+        }
+
+        // Open GemmaFiles folder
+        async function openFolder() {
+            try {
+                await fetch("/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "open_folder" })
+                });
+            } catch (e) {
+                console.error("Error opening folder:", e);
+            }
+        }
+
+        // Exit program
+        function exitProgram() {
+            window.close();
+        }
+
+        // Initialize
+        loadConfig();
+        document.getElementById("message").addEventListener("keypress", (e) => {
+            if (e.key === "Enter") sendMessage();
+        });
+    </script>
+</body>
+</html>
